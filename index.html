@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Cat Bot</title>
+    <meta name="description" content="cat bot">
+    <meta name="author" content="Dipin">
+    <style>
+        canvas {
+            border: 1px solid #d3d3d3;
+            background-color: #f1f1f1;
+        }
+    </style>
+</head>
+<body>
+<script>
+(() => {
+    const myGameHurdles = [];
+    let myGameFood = null;
+    let closedSquares = {
+        keys: [],
+    };
+
+    let openSquares = {
+        keys: [],
+    };
+
+    const myGamePiece = new gamePiece({
+        width: 20, 
+        height: 20, 
+        color: "blue",
+        x: getRandomInt(7) * 20,
+        y: getRandomInt(6) * 20
+    });
+
+    const myGameArea = {
+        width: 140, 
+        height: 120, 
+        canvas: document.createElement("canvas"),
+        start: function() {
+            this.canvas.width = this.width;
+            this.canvas.height = this.height;
+            this.context = this.canvas.getContext("2d");
+            document.body.insertBefore(this.canvas, document.body.childNodes[0]);
+            this.frameInterval = setInterval(updateGameArea, 500);
+        },
+        clear: function() {
+            this.context.clearRect(0, 0, this.width, this.height);
+        },
+        drawGrid: function() {
+            for(let x=1; x<7; x++) {
+                this.context.moveTo(x * 20, 0);
+                this.context.lineTo(x * 20, this.height);
+                this.context.strokeStyle = "#d3d3d3";
+                this.context.stroke();
+            }
+
+            for( let y=1; y<6; y++) {
+                this.context.moveTo(0, y * 20);
+                this.context.lineTo(this.width, y * 20);
+                this.context.strokeStyle = "#d3d3d3";
+                this.context.stroke();
+            }
+        },  
+        addFood: function() {
+            this.context.fillStyle = myGameFood.color;
+            this.context.fillRect(myGameFood.x, myGameFood.y, myGameFood.width, myGameFood.height);
+        },
+        addHurdles: function() {
+            myGameHurdles.forEach(hurdle => {
+                this.context.fillStyle = hurdle.color;
+                this.context.fillRect(hurdle.x, hurdle.y, hurdle.width, hurdle.height);
+            })
+        },
+        drawClosedSquares: function() {
+            closedSquares.keys.forEach(key => {
+                this.context.fillStyle = "yellow";
+                this.context.fillRect(key.x, key.y, myGameFood.width, myGameFood.height);
+            });
+        }, 
+        drawOpenSquares: function() {
+            openSquares.keys.forEach(key => {
+                this.context.fillStyle = "pink";
+                this.context.fillRect(key.x, key.y, myGameFood.width, myGameFood.height);
+            });
+        },
+        drawFullPath: function() {
+            myGamePiece.fullPath.forEach(path => {
+                this.context.fillStyle = 'white';
+                this.context.fillRect(path.x, path.y, path.width, path.height);
+            });
+        }  
+    };
+
+    function gamePiece(piece) {
+        this.width = piece.width;
+        this.height = piece.height;
+        this.color = piece.color;
+        this.x = piece.x;
+        this.y = piece.y;
+        this.dTravelled = 0;
+        this.hasFinishedExploring = false;
+        this.hasFoundPath = false;
+        this.currentPos = this;
+        this.fullPath = [];
+        this.nextPos = function() {
+            if (this.fullPath.length > 0) {
+                const newPath = this.fullPath.pop();
+                this.x = newPath.x;
+                this.y = newPath.y;
+            } else {
+                closedSquares = {
+                    keys: [],
+                };
+
+                openSquares = {
+                    keys: [],
+                };
+                this.dTravelled = 0;
+                this.hasFinishedExploring = false;
+                this.hasFoundPath = false;
+                this.currentPos = this;
+                this.fullPath = [];
+                createFood();
+            }
+        };
+        this.update = function() {
+            const ctx = myGameArea.context;
+            ctx.fillStyle = this.color;
+            ctx.fillRect(this.x, this.y, this.width, this.height);
+        };
+    }
+
+    function createHurdle() {
+        const xValue = getRandomInt(7) * 20;
+        const yValue = getRandomInt(6) * 20;
+        const hurdle = {
+            width: 20, 
+            height: 20, 
+            color: "red",
+            x: xValue,
+            y: yValue
+        };
+
+        if ( hurdle.x !== myGamePiece.x && 
+             hurdle.y !== myGamePiece.y ) {
+            myGameHurdles.push(hurdle);
+        } else {
+            createHurdle();
+        }
+    }
+
+    function createFood() {
+        const xValue = getRandomInt(7) * 20;
+        const yValue = getRandomInt(6) * 20;
+        const food = {
+            width: 20, 
+            height: 20, 
+            color: "green",
+            x: xValue,
+            y: yValue
+        };
+
+        if ( food.x !== myGamePiece.x && 
+            food.y !== myGamePiece.y && 
+            !gameHurdlesCollision(food) ) {
+            myGameFood = food;
+        } else {
+            createFood();
+        }
+    }
+
+    function updateGameArea() {
+        myGameArea.clear();
+        myGameArea.drawGrid();
+        if (!myGamePiece.hasFinishedExploring) {
+            explorePaths(myGamePiece.currentPos);
+        } else if (!myGamePiece.hasFoundPath){
+            const currentPiece = myGamePiece.currentPos;
+            delete closedSquares[currentPiece.x][currentPiece.y];
+            myGamePiece.fullPath.push(currentPiece);
+            findPath(currentPiece);
+        } else if (myGamePiece.hasFoundPath) {
+            myGamePiece.nextPos();
+        }
+        myGameArea.drawOpenSquares();
+        myGameArea.drawClosedSquares();
+        myGameArea.drawFullPath();
+        myGamePiece.update();
+        myGameArea.addHurdles();
+        myGameArea.addFood();
+    }
+
+    function explorePaths(square) {
+        let nextSquare = null;
+        let minWeight = myGameArea.width * myGameArea.height;
+        if (addToCloseSquares(square) === 0) {
+            myGamePiece.hasFinishedExploring = true;
+            return;
+        }
+
+        let newSquare = Object.assign({}, square);
+        newSquare.x = newSquare.x + 20;
+        if ( !gameAreaCollision(newSquare) && 
+             !gameHurdlesCollision(newSquare) && 
+             !(closedSquares[newSquare.x] && closedSquares[newSquare.x][newSquare.y]) ) {
+            const newWeight = openSquares[newSquare.x] && openSquares[newSquare.x][newSquare.y] ? openSquares[newSquare.x][newSquare.y].weight : addToOpenSquares(newSquare);
+            if(newWeight < minWeight) {
+                minWeight = newWeight;
+                nextSquare = newSquare;
+            } 
+        }
+
+        newSquare = Object.assign({}, square);
+        newSquare.x = newSquare.x - 20;
+        if ( !gameAreaCollision(newSquare) && 
+             !gameHurdlesCollision(newSquare) && 
+             !(closedSquares[newSquare.x] && closedSquares[newSquare.x][newSquare.y]) ) {
+            const newWeight = openSquares[newSquare.x] && openSquares[newSquare.x][newSquare.y] ? openSquares[newSquare.x][newSquare.y].weight : addToOpenSquares(newSquare);
+            if(newWeight < minWeight) {
+                minWeight = newWeight;
+                nextSquare = newSquare;
+            } 
+        }
+
+        newSquare = Object.assign({}, square);
+        newSquare.y = newSquare.y + 20;
+        if ( !gameAreaCollision(newSquare) && 
+             !gameHurdlesCollision(newSquare) && 
+             !(closedSquares[newSquare.x] && closedSquares[newSquare.x][newSquare.y]) ) {
+            const newWeight = openSquares[newSquare.x] && openSquares[newSquare.x][newSquare.y] ? openSquares[newSquare.x][newSquare.y].weight : addToOpenSquares(newSquare);
+            if(newWeight < minWeight) {
+                minWeight = newWeight;
+                nextSquare = newSquare;
+            } 
+        }
+
+        newSquare = Object.assign({}, square);
+        newSquare.y = newSquare.y - 20;
+        if ( !gameAreaCollision(newSquare) && 
+             !gameHurdlesCollision(newSquare) && 
+             !(closedSquares[newSquare.x] && closedSquares[newSquare.x][newSquare.y]) ) {
+            const newWeight = openSquares[newSquare.x] && openSquares[newSquare.x][newSquare.y] ? openSquares[newSquare.x][newSquare.y].weight : addToOpenSquares(newSquare);
+            if(newWeight < minWeight) {
+                minWeight = newWeight;
+                nextSquare = newSquare;
+            } 
+        }        
+
+        if (!nextSquare) {
+            const key = openSquares.keys.pop();
+            if (key) {
+                nextSquare = openSquares[key.x][key.y];
+                delete openSquares[key.x][key.y];
+            } else {
+                alert("I am stuck");
+                myGamePiece.hasFinishedExploring = true;
+                myGamePiece.hasFoundPath = true;
+            }
+        }
+        myGamePiece.currentPos = nextSquare;  
+    }
+
+    function addToCloseSquares(square) {
+        if(!square.weight) {
+            const dFromFood = calculateDistance(square, myGameFood);
+            square.weight = dFromFood + square.dTravelled;
+        }
+
+        if(square.x === myGameFood.x && square.y === myGameFood.y) {
+            square.weight = 0;
+        }
+
+        closedSquares[square.x] = closedSquares[square.x] ? closedSquares[square.x] : {};
+        closedSquares[square.x][square.y] = square;
+        closedSquares.keys.push({
+            x: square.x,
+            y: square.y
+        });
+
+        return square.weight;
+    }
+
+    function addToOpenSquares(square) {
+        const dFromFood = calculateDistance(square, myGameFood);
+        const dFromPiece = 0;
+        const weight = dFromPiece + dFromFood;
+        square.weight = weight;
+        square.dTravelled = dFromPiece;
+        openSquares[square.x] = openSquares[square.x] ? openSquares[square.x] : {};
+        openSquares[square.x][square.y] = square;
+        openSquares.keys.push({
+            x: square.x,
+            y: square.y
+        });
+
+        return square.weight;
+    }
+
+    function findPath(square) {
+        let returnSquare = null;
+        let minWeight = myGameArea.width * myGameArea.height;
+
+        if (square.x === myGamePiece.x && square.y === myGamePiece.y) {
+            myGamePiece.hasFoundPath = true;
+            return;
+        }
+
+        let newReturnSquare = Object.assign({}, square);
+        newReturnSquare.x = newReturnSquare.x + 20;
+        let newWeight = calculateDistance(newReturnSquare, myGamePiece);
+        if ( closedSquares[newReturnSquare.x] &&
+             closedSquares[newReturnSquare.x][newReturnSquare.y] &&
+             newWeight < minWeight ) {
+            minWeight = newWeight;
+            returnSquare = closedSquares[newReturnSquare.x][newReturnSquare.y];
+        }
+
+        newReturnSquare = Object.assign({}, square);
+        newReturnSquare.x = newReturnSquare.x - 20;
+        newWeight = calculateDistance(newReturnSquare, myGamePiece);
+        if ( closedSquares[newReturnSquare.x] &&
+             closedSquares[newReturnSquare.x][newReturnSquare.y] &&
+             newWeight < minWeight ) {
+            minWeight = newWeight;
+            returnSquare = closedSquares[newReturnSquare.x][newReturnSquare.y];
+        }    
+
+        newReturnSquare = Object.assign({}, square);
+        newReturnSquare.y = newReturnSquare.y + 20;
+        newWeight = calculateDistance(newReturnSquare, myGamePiece);
+        if ( closedSquares[newReturnSquare.x] &&
+             closedSquares[newReturnSquare.x][newReturnSquare.y] &&
+             newWeight < minWeight ) {
+            minWeight = newWeight;
+            returnSquare = closedSquares[newReturnSquare.x][newReturnSquare.y];
+        }   
+
+        newReturnSquare = Object.assign({}, square);
+        newReturnSquare.y = newReturnSquare.y - 20;
+        newWeight = calculateDistance(newReturnSquare, myGamePiece);
+        if ( closedSquares[newReturnSquare.x] &&
+             closedSquares[newReturnSquare.x][newReturnSquare.y] &&
+             newWeight < minWeight ) {
+            minWeight = newWeight;
+            returnSquare = closedSquares[newReturnSquare.x][newReturnSquare.y];
+        }                   
+
+        myGamePiece.currentPos = returnSquare;
+    }
+
+    function gameStart() {
+        myGameArea.start();
+        myGameArea.drawGrid();
+        createHurdle();
+        createHurdle();
+        createHurdle();
+        createHurdle();
+        createHurdle();
+        createHurdle();
+        createHurdle();      
+        createFood();
+        myGamePiece.update();
+        myGameArea.addHurdles();
+        myGameArea.addFood();
+    } 
+
+    gameStart();
+
+    /* helper functions */
+    // function to get random integer
+    function getRandomInt(max) {
+        return Math.floor(Math.random() * Math.floor(max));
+    }
+
+    // function to detect collision between items
+    function detectCollision(newComponent, exsistingComponent) {
+        const pieceTLX = newComponent.x;
+        const pieceTLY = newComponent.y;
+        const pieceTRX = newComponent.x + newComponent.width;
+        const pieceTRY = newComponent.y;
+        const pieceBLX = newComponent.x;
+        const pieceBLY = newComponent.y + newComponent.height;
+        const pieceBRX = newComponent.x + newComponent.width;
+        const pieceBRY = newComponent.y + newComponent.height;
+
+        const hurdleXStart = exsistingComponent.x;
+        const hurdleXEnd = exsistingComponent.x + exsistingComponent.width;
+        const hurdleYStart = exsistingComponent.y;
+        const hurdleYEnd = exsistingComponent.y + exsistingComponent.height;
+
+        if(( pieceTRX >= hurdleXStart &&
+                pieceTRX <= hurdleXEnd && 
+                pieceTRY >= hurdleYStart &&
+                pieceTRY <= hurdleYEnd) || 
+            ( pieceBRX >= hurdleXStart &&
+                pieceBRX <= hurdleXEnd &&
+                pieceBRY >= hurdleYStart &&
+                pieceBRY <= hurdleYEnd)  || 
+            ( pieceTLX >= hurdleXStart &&
+                pieceTLX <= hurdleXEnd && 
+                pieceTLY >= hurdleYStart &&
+                pieceTLY <= hurdleYEnd) || 
+            ( pieceBLX >= hurdleXStart &&
+                pieceBLX <= hurdleXEnd &&
+                pieceBLY >= hurdleYStart &&
+                pieceBLY <= hurdleYEnd) ) {
+                return true;
+        }
+        return false;        
+    }    
+
+    // check to see if there is collision with game area
+    function gameAreaCollision(gamePiece) {
+        if ( (gamePiece.x)  >= 0 &&
+             (gamePiece.x + 20) <= myGameArea.width &&
+             (gamePiece.y) >= 0  &&
+             (gamePiece.y + 20) <= myGameArea.height) {
+            return false;
+        } 
+        return true;
+    }
+
+    // check for collision with game hurdles
+    function gameHurdlesCollision(gamePiece) {
+        let hasCollision  = false;
+        myGameHurdles.forEach(hurdle => {
+            if ( (hurdle.x === gamePiece.x && hurdle.y === gamePiece.y) ) {
+                hasCollision = true;
+            }
+        });
+        return hasCollision;
+    }
+
+    // function to calculate the shortest distance between two objects
+    function calculateDistance(firstObj, secondObj) {
+        const dx = Math.abs(firstObj.x - secondObj.x) / 20;
+        const dy = Math.abs(firstObj.y - secondObj.y) / 20;
+        return dx + dy;
+    }    
+    /* helper functions */
+})();
+</script>
+</body>
+</html>
